@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Zone Authority Login</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+
+<body>
+<h2>School / Hospital Login</h2>
+
+<input id="username" placeholder="Username"><br><br>
+<input id="password" type="password" placeholder="Password"><br><br>
+
+<select id="role">
+  <option value="school">School</option>
+  <option value="hospital">Hospital</option>
+</select><br><br>
+
+<button onclick="login()">Login</button>
+<p id="msg"></p>
+
+<script>
+function login(){
+  const u = username.value;
+  const p = password.value;
+  const r = role.value;
+
+  // DEMO PASSWORD
+  if(p === "zone123"){
+    localStorage.setItem("zoneUser",
+      JSON.stringify({username:u, role:r})
+    );
+    window.location.href = "zonedashboard.html";
+  }else{
+    msg.innerText = "Wrong password";
+  }
+}
+</script>
+</body>
+</html>
