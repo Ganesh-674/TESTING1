@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Public View</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+#map{height:400px;}
+#msg{font-size:18px;}
+</style>
+</head>
+
+<body>
+
+<h2>Public Zone View</h2>
+<div id="msg">Normal Road</div>
+<div id="map"></div>
+
+<script type="module">
+import { initializeApp } from
+"https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+import { getDatabase, ref, onValue } from
+"https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+const firebaseConfig = {
+  databaseURL:"https://speed-alert-fd1be-default-rtdb.firebaseio.com"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const map = L.map("map").setView([10.9945,77.0835],15);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
+.addTo(map);
+
+const marker = L.marker([0,0]).addTo(map);
+const zones = [];
+
+onValue(ref(db,"zones"), snap=>{
+  snap.forEach(z=>{
+    const d = z.val();
+    const rect = L.rectangle(
+      [[d.lat1,d.lng1],[d.lat2,d.lng2]],
+      {color:"red",fillOpacity:0.2}
+    ).addTo(map);
+    rect.type = d.type;
+    zones.push(rect);
+  });
+});
+
+onValue(ref(db,"GPS"), snap=>{
+  const d = snap.val();
+  if(!d) return;
+
+  const lat = d.f_latitude;
+  const lng = d.f_longitude;
+
+  marker.setLatLng([lat,lng]);
+  map.setView([lat,lng],18);
+
+  let inside=false;
+  zones.forEach(z=>{
+    if(z.getBounds().contains([lat,lng])){
+      msg.innerText = "⚠ Entering "+z.type+" zone";
+      inside=true;
+    }
+  });
+
+  if(!inside) msg.innerText="Normal Road";
+});
+</script>
+
+</body>
+</html>
