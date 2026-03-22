@@ -1,80 +1,328 @@
 <!DOCTYPE html>
 <html>
 <head>
+
 <title>Zone Dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet"
+href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
-#map{height:400px;}
+
+body{
+font-family:Arial;
+margin:10px;
+}
+
+#map{
+height:450px;
+margin-top:10px;
+}
+
+input{
+margin:4px;
+}
+
+button{
+margin:5px;
+}
+
 </style>
+
 </head>
 
 <body>
 
 <script>
-const zoneUser = JSON.parse(localStorage.getItem("zoneUser"));
+
+const zoneUser =
+JSON.parse(localStorage.getItem("zoneUser"));
+
 if(!zoneUser){
-  alert("Login required");
-  window.location.href="zone-login.html";
+
+alert("Login required");
+window.location.href="zone-login.html";
+
 }
+
 </script>
 
 <h3>Logged in as: <span id="role"></span></h3>
 
-Lat1 <input id="lat1" value="10.9945">
-Lng1 <input id="lng1" value="77.0835"><br><br>
+<!-- SEARCH LOCATION -->
 
-Lat2 <input id="lat2" value="10.9955">
-Lng2 <input id="lng2" value="77.0845"><br><br>
+Search Location
+<input id="searchText" placeholder="Enter place name">
+<button onclick="searchLocation()">Search</button>
 
-Speed Limit <input id="limit" value="30"><br><br>
+<br><br>
+
+Lat1 <input id="lat1">
+Lng1 <input id="lng1"><br>
+
+Lat2 <input id="lat2">
+Lng2 <input id="lng2"><br><br>
+
+Speed Limit
+<input id="limit" value="20"> km/h
+
+<br><br>
+
+Zone Size
+<input type="range"
+id="size"
+min="0.0002"
+max="0.002"
+step="0.0001"
+value="0.0005">
+
+<br><br>
+
+<button onclick="manualZone()">Manual Zone</button>
+
+<button onclick="autoZone()">Auto Road Zone</button>
+
+<br><br>
 
 <button onclick="addZone()">Add Zone</button>
+
 <button onclick="logout()">Logout</button>
 
 <div id="map"></div>
 
-<!-- Firebase -->
 <script type="module">
-import { initializeApp } from
-"https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-import { getDatabase, ref, set } from
-"https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+import { initializeApp }
+from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+
+import { getDatabase, ref, set }
+from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
 
 document.getElementById("role").innerText = zoneUser.role;
 
 const firebaseConfig = {
-  databaseURL:"https://speed-alert-fd1be-default-rtdb.firebaseio.com"
+
+databaseURL:
+"https://speed-alert-fd1be-default-rtdb.firebaseio.com"
+
 };
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-const map = L.map("map").setView([10.9945,77.0835],15);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
-.addTo(map);
+/* MAP */
+
+const map = L.map("map")
+.setView([10.9945,77.0835],15);
+
+L.tileLayer(
+"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+).addTo(map);
+
+let previewZone;
+
+/* MAP CLICK FOR MANUAL ZONE */
+
+map.on("click",function(e){
+
+const lat = e.latlng.lat;
+const lng = e.latlng.lng;
+
+lat1.value = lat;
+lng1.value = lng;
+
+updateZone();
+
+});
+
+/* ZONE SIZE CONTROL */
+
+size.oninput = updateZone;
+
+function updateZone(){
+
+const s = parseFloat(size.value);
+
+lat2.value = parseFloat(lat1.value) + s;
+lng2.value = parseFloat(lng1.value) + s;
+
+if(previewZone) map.removeLayer(previewZone);
+
+previewZone = L.rectangle(
+
+[[lat1.value,lng1.value],[lat2.value,lng2.value]],
+
+{color:"blue",fillOpacity:0.2}
+
+).addTo(map);
+
+}
+
+/* MANUAL BUTTON */
+
+window.manualZone = ()=>{
+
+alert("Click on the map to create zone manually");
+
+}
+
+/* ADD ZONE TO FIREBASE */
 
 window.addZone = ()=>{
-  const data = {
-    type: zoneUser.role,
-    lat1:+lat1.value,
-    lng1:+lng1.value,
-    lat2:+lat2.value,
-    lng2:+lng2.value,
-    limit:+limit.value
-  };
 
-  set(ref(db,"zones/"+Date.now()),data);
-  alert("Zone Added");
+const data = {
+
+type:zoneUser.role,
+
+lat1:+lat1.value,
+lng1:+lng1.value,
+
+lat2:+lat2.value,
+lng2:+lng2.value,
+
+limit:+limit.value
+
 };
+
+set(ref(db,"zones/"+Date.now()),data);
+
+alert("Zone Added");
+
+}
+
+/* LOGOUT */
 
 window.logout = ()=>{
-  localStorage.removeItem("zoneUser");
-  window.location.href="zonelogin.html";
-};
+
+localStorage.removeItem("zoneUser");
+
+window.location.href="zone-login.html";
+
+}
+
+</script>
+
+<script>
+
+/* SEARCH LOCATION */function searchLocation(){
+
+const place = document.getElementById("searchText").value;
+
+if(place.trim()===""){
+alert("Enter a location");
+return;
+}
+
+const url =
+"https://nominatim.openstreetmap.org/search?format=json&limit=1&q="
++ encodeURIComponent(place);
+
+fetch(url,{
+headers:{
+"Accept":"application/json"
+}
+})
+
+.then(response=>response.json())
+
+.then(data=>{
+
+if(!data || data.length===0){
+
+alert("Location not found");
+return;
+
+}
+
+const lat = parseFloat(data[0].lat);
+const lon = parseFloat(data[0].lon);
+
+/* move map */
+
+map.setView([lat,lon],17);
+
+/* fill coordinates */
+
+document.getElementById("lat1").value = lat;
+document.getElementById("lng1").value = lon;
+
+/* draw zone */
+
+updateZone();
+
+})
+
+.catch(err=>{
+
+console.log(err);
+alert("Search failed. Check internet or try another location.");
+
+});
+
+}
+/* AUTO ROAD DETECTION */
+
+function autoZone(){
+
+const lat = parseFloat(lat1.value);
+const lng = parseFloat(lng1.value);
+
+const query =
+"https://overpass-api.de/api/interpreter?data=[out:json];way(around:120,"+
+lat+","+lng+")[\"highway\"];out geom;";
+
+fetch(query)
+
+.then(r=>r.json())
+
+.then(data=>{
+
+if(data.elements.length===0){
+
+alert("No road detected nearby");
+return;
+
+}
+
+const road = data.elements[0];
+
+let minLat = 999;
+let minLng = 999;
+let maxLat = -999;
+let maxLng = -999;
+
+road.geometry.forEach(p=>{
+
+if(p.lat<minLat) minLat=p.lat;
+if(p.lon<minLng) minLng=p.lon;
+
+if(p.lat>maxLat) maxLat=p.lat;
+if(p.lon>maxLng) maxLng=p.lon;
+
+});
+
+lat1.value = minLat;
+lng1.value = minLng;
+
+lat2.value = maxLat;
+lng2.value = maxLng;
+
+if(previewZone) map.removeLayer(previewZone);
+
+previewZone = L.rectangle(
+[[minLat,minLng],[maxLat,maxLng]],
+{color:"green",fillOpacity:0.2}
+).addTo(map);
+
+alert("Auto road zone created");
+
+});
+
+}
+
 </script>
 
 </body>
