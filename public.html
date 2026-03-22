@@ -1,76 +1,250 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Public View</title>
+
+<title>Vehicle Monitoring</title>
+
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet"
+href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
-#map{height:400px;}
-#msg{font-size:18px;}
+
+#map{
+height:500px;
+}
+
+#msg{
+font-size:18px;
+padding:10px;
+background:#eee;
+}
+
 </style>
+
 </head>
 
 <body>
 
-<h2>Public Zone View</h2>
-<div id="msg">Normal Road</div>
+<h2>Live Vehicle Monitoring</h2>
+
+<div id="msg">Waiting for GPS...</div>
+
 <div id="map"></div>
 
+
 <script type="module">
-import { initializeApp } from
-"https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-import { getDatabase, ref, onValue } from
-"https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+import { initializeApp }
+from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+
+import { getDatabase, ref, onValue, set }
+from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+
+
+/* Firebase */
 
 const firebaseConfig = {
-  databaseURL:"https://speed-alert-fd1be-default-rtdb.firebaseio.com"
+
+databaseURL:
+"https://speed-alert-fd1be-default-rtdb.firebaseio.com"
+
 };
 
 const app = initializeApp(firebaseConfig);
+
 const db = getDatabase(app);
 
-const map = L.map("map").setView([10.9945,77.0835],15);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
-.addTo(map);
 
-const marker = L.marker([0,0]).addTo(map);
+/* Map */
+
+const map = L.map("map").setView([11,77],13);
+
+L.tileLayer(
+"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+{ maxZoom:19 }
+).addTo(map);
+
+
+/* device markers */
+
+const markers = {};
+
+
+/* zones */
+
 const zones = [];
 
+
+/* first GPS flag */
+
+let firstLocation = true;
+
+
+/* Load zones */
+
 onValue(ref(db,"zones"), snap=>{
-  snap.forEach(z=>{
-    const d = z.val();
-    const rect = L.rectangle(
-      [[d.lat1,d.lng1],[d.lat2,d.lng2]],
-      {color:"red",fillOpacity:0.2}
-    ).addTo(map);
-    rect.type = d.type;
-    zones.push(rect);
-  });
+
+zones.forEach(z=>map.removeLayer(z));
+zones.length = 0;
+
+snap.forEach(z=>{
+
+const d = z.val();
+
+const rect = L.rectangle(
+[[d.lat1,d.lng1],[d.lat2,d.lng2]],
+{color:"red",fillOpacity:0.2}
+).addTo(map);
+
+rect.data = d;
+
+zones.push(rect);
+
 });
 
-onValue(ref(db,"GPS"), snap=>{
-  const d = snap.val();
-  if(!d) return;
-
-  const lat = d.f_latitude;
-  const lng = d.f_longitude;
-
-  marker.setLatLng([lat,lng]);
-  map.setView([lat,lng],18);
-
-  let inside=false;
-  zones.forEach(z=>{
-    if(z.getBounds().contains([lat,lng])){
-      msg.innerText = "⚠ Entering "+z.type+" zone";
-      inside=true;
-    }
-  });
-
-  if(!inside) msg.innerText="Normal Road";
 });
+
+
+/* Listen devices */
+
+onValue(ref(db,"devices"), snap=>{
+
+snap.forEach(dev=>{
+
+const id = dev.key;
+
+const d = dev.val();
+
+if(!markers[id]){
+
+markers[id] =
+L.marker([d.lat,d.lng])
+.addTo(map)
+.bindPopup(id);
+
+}
+else{
+
+markers[id].setLatLng([d.lat,d.lng]);
+
+}
+
+
+/* Move map to user only first time */
+
+if(firstLocation){
+
+map.setView([d.lat,d.lng],17);
+
+firstLocation = false;
+
+}
+
+
+checkZones(d.lat,d.lng,d.speed,id);
+
+});
+
+});
+
+
+/* Zone detection */
+
+function checkZones(lat,lng,speed,id){
+
+let inside=false;
+
+zones.forEach(z=>{
+
+const data = z.data;
+
+if(z.getBounds().contains([lat,lng])){
+
+inside=true;
+
+if(speed > data.limit){
+
+msg.innerText =
+"🚨 "+id+" OVER SPEED in "
++data.type+" zone";
+
+logViolation(id,data.type,speed,data.limit);
+
+}
+else{
+
+msg.innerText =
+"⚠ "+id+" inside "
++data.type+" zone";
+
+}
+
+}
+
+});
+
+if(!inside){
+
+msg.innerText="Normal Road";
+
+}
+
+}
+
+
+/* violation logging */
+
+function logViolation(device,type,speed,limit){
+
+const violation = {
+
+device:device,
+zone:type,
+speed:speed,
+limit:limit,
+time:Date.now()
+
+};
+
+set(ref(db,"violations/"+Date.now()),violation);
+
+}
+
+
+/* PHONE GPS MODE */
+
+if(navigator.geolocation){
+
+navigator.geolocation.watchPosition(function(pos){
+
+const lat = pos.coords.latitude;
+
+const lng = pos.coords.longitude;
+
+let speed = pos.coords.speed;
+
+if(speed == null){
+
+speed = 0;
+
+}
+
+set(ref(db,"devices/phone_user"),{
+
+lat:lat,
+lng:lng,
+speed:speed
+
+});
+
+});
+
+}
+
 </script>
 
 </body>
