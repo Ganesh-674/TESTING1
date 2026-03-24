@@ -8,71 +8,27 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
-body{
-margin:0;
-font-family:Arial;
-}
-
-#topbar{
-padding:10px;
-background:#eee;
-display:flex;
-align-items:center;
-gap:15px;
-font-size:18px;
-}
-
-#led{
-width:15px;
-height:15px;
-border-radius:50%;
-background:gray;
-box-shadow:0 0 5px rgba(0,0,0,0.5);
-transition:0.3s;
-}
-
-#map{
-height:400px;
-}
-
-#msg{
-font-weight:bold;
-}
-
-table{
-width:100%;
-border-collapse:collapse;
-margin-top:10px;
-}
-
-th,td{
-border:1px solid #ccc;
-padding:8px;
-text-align:center;
-}
-
-th{
-background:#2a5298;
-color:white;
-}
+body{margin:0;font-family:Arial;}
+#topbar{padding:10px;background:#eee;display:flex;gap:15px;align-items:center;}
+#led{width:15px;height:15px;border-radius:50%;background:gray;}
+#map{height:400px;}
+table{width:100%;border-collapse:collapse;margin-top:10px;}
+th,td{border:1px solid #ccc;padding:8px;text-align:center;}
+th{background:#2a5298;color:white;}
 </style>
 </head>
 
 <body>
 
-<!-- TOP STATUS BAR -->
 <div id="topbar">
 <span id="speedBox">Speed: 0 km/h</span>
 <div id="led"></div>
 <span id="msg">Normal Road</span>
 </div>
 
-<!-- MAP -->
 <div id="map"></div>
 
-<!-- VIOLATION LOG -->
 <h3 style="padding:10px;">🚨 Violation Log</h3>
-
 <table>
 <tr>
 <th>Speed</th>
@@ -85,11 +41,8 @@ color:white;
 
 <script type="module">
 
-import { initializeApp } from
-"https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-
-import { getDatabase, ref, onValue } from
-"https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
 
 const firebaseConfig = {
   databaseURL:"https://speed-alert-fd1be-default-rtdb.firebaseio.com"
@@ -100,23 +53,21 @@ const db = getDatabase(app);
 
 // MAP
 const map = L.map("map").setView([10.9945,77.0835],15);
-
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
-.addTo(map);
-
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 const marker = L.marker([0,0]).addTo(map);
 
-// UI ELEMENTS
+// UI
 const speedBox = document.getElementById("speedBox");
 const led = document.getElementById("led");
 const msg = document.getElementById("msg");
 
-let zones = [];
+// LOCAL ZONE STORAGE (IMPORTANT FIX)
+let zonesLocal = [];
 let lastLogTime = 0;
 
-// LOAD ZONES
+// LOAD ZONES FROM FIREBASE
 onValue(ref(db,"zones"), snap=>{
-  zones = [];
+  zonesLocal = [];
 
   snap.forEach(z=>{
     const d = z.val();
@@ -126,10 +77,11 @@ onValue(ref(db,"zones"), snap=>{
       {color:"red",fillOpacity:0.2}
     ).addTo(map);
 
-    rect.type = d.type;
-    rect.limit = d.limit;
-
-    zones.push(rect);
+    zonesLocal.push({
+      bounds: rect.getBounds(),
+      type: d.type,
+      limit: d.limit
+    });
   });
 });
 
@@ -141,21 +93,19 @@ onValue(ref(db,"GPS"), snap=>{
   const lat = d.f_latitude;
   const lng = d.f_longitude;
 
-  // ✅ FIXED SPEED (f_speed → km/h)
+  // ✅ FIXED SPEED
   const speed = (d.f_speed || 0) * 3.6;
 
-  // UPDATE SPEED
   speedBox.innerText = "Speed: " + speed.toFixed(1) + " km/h";
 
-  // MOVE MARKER
   marker.setLatLng([lat,lng]);
   map.setView([lat,lng],18);
 
   let inside = false;
   let overspeed = false;
 
-  zones.forEach(z=>{
-    if(z.getBounds().contains([lat,lng])){
+  zonesLocal.forEach(z=>{
+    if(z.bounds.contains([lat,lng])){
 
       inside = true;
 
@@ -166,9 +116,8 @@ onValue(ref(db,"GPS"), snap=>{
 
         const now = Date.now();
 
-        // PREVENT SPAM LOG
-        if(now - lastLogTime > 5000){
-
+        // LOG FIX
+        if(now - lastLogTime > 3000){
           lastLogTime = now;
 
           const time = new Date().toLocaleTimeString();
@@ -188,7 +137,6 @@ onValue(ref(db,"GPS"), snap=>{
       }else{
         msg.innerText = "Inside "+z.type+" zone (Safe)";
       }
-
     }
   });
 
@@ -196,13 +144,11 @@ onValue(ref(db,"GPS"), snap=>{
     msg.innerText = "Normal Road";
   }
 
-  // LED CONTROL
+  // LED
   if(overspeed){
     led.style.background = "red";
-    led.style.boxShadow = "0 0 10px red";
   }else{
     led.style.background = "green";
-    led.style.boxShadow = "0 0 10px green";
   }
 
 });
