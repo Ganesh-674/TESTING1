@@ -62,13 +62,9 @@ color:white;
 
 <!-- TOP STATUS BAR -->
 <div id="topbar">
-
 <span id="speedBox">Speed: 0 km/h</span>
-
 <div id="led"></div>
-
 <span id="msg">Normal Road</span>
-
 </div>
 
 <!-- MAP -->
@@ -144,10 +140,12 @@ onValue(ref(db,"GPS"), snap=>{
 
   const lat = d.f_latitude;
   const lng = d.f_longitude;
-  const speed = d.speed || 0;
+
+  // ✅ FIXED SPEED (f_speed → km/h)
+  const speed = (d.f_speed || 0) * 3.6;
 
   // UPDATE SPEED
-  speedBox.innerText = "Speed: " + speed + " km/h";
+  speedBox.innerText = "Speed: " + speed.toFixed(1) + " km/h";
 
   // MOVE MARKER
   marker.setLatLng([lat,lng]);
@@ -177,7 +175,7 @@ onValue(ref(db,"GPS"), snap=>{
 
           const row = `
           <tr>
-          <td>${speed} km/h</td>
+          <td>${speed.toFixed(1)} km/h</td>
           <td>${time}</td>
           <td>${z.type}</td>
           <td>${lat.toFixed(5)}, ${lng.toFixed(5)}</td>
