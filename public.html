@@ -1,155 +1,244 @@
 <!DOCTYPE html>
 <html>
 <head>
+
 <title>Public View</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet"
+href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;}
-#topbar{padding:10px;background:#eee;display:flex;gap:15px;align-items:center;}
-#led{width:15px;height:15px;border-radius:50%;background:gray;}
-#map{height:400px;}
-table{width:100%;border-collapse:collapse;margin-top:10px;}
-th,td{border:1px solid #ccc;padding:8px;text-align:center;}
-th{background:#2a5298;color:white;}
+
+/* TOP BAR */
+#topbar{
+position:fixed;
+top:0;
+left:0;
+width:100%;
+background:black;
+color:white;
+padding:10px;
+text-align:center;
+z-index:1000;
+}
+
+/* MAP */
+#map{
+height:65vh;
+width:100%;
+margin-top:50px;
+}
+
+/* VIOLATION PANEL */
+#violationsPanel{
+height:35vh;
+overflow-y:auto;
+background:#111;
+color:white;
+padding:10px;
+}
+
+.violation{
+border-bottom:1px solid gray;
+padding:8px;
+}
+
+.overspeed{ color:red; }
+.safe{ color:lightgreen; }
+
 </style>
+
 </head>
 
 <body>
 
-<div id="topbar">
-<span id="speedBox">Speed: 0 km/h</span>
-<div id="led"></div>
-<span id="msg">Normal Road</span>
-</div>
+<div id="topbar">🚦 Waiting for GPS...</div>
 
 <div id="map"></div>
 
-<h3 style="padding:10px;">🚨 Violation Log</h3>
-<table>
-<tr>
-<th>Speed</th>
-<th>Time</th>
-<th>Zone</th>
-<th>Location</th>
-</tr>
-<tbody id="log"></tbody>
-</table>
+<div id="violationsPanel">
+<h3>🚨 Violations</h3>
+<div id="list"></div>
+</div>
 
 <script type="module">
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
+import { initializeApp }
+from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
 
-const firebaseConfig = {
-  databaseURL:"https://speed-alert-fd1be-default-rtdb.firebaseio.com"
-};
+import { getDatabase, ref, onValue, push }
+from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
 
-const app = initializeApp(firebaseConfig);
+/* FIREBASE */
+const app = initializeApp({
+databaseURL:"https://speed-alert-fd1be-default-rtdb.firebaseio.com"
+});
+
 const db = getDatabase(app);
 
-// MAP
-const map = L.map("map").setView([10.9945,77.0835],15);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
-const marker = L.marker([0,0]).addTo(map);
+/* MAP */
+const map = L.map("map")
+.setView([10.9945,77.0835],15);
 
-// UI
-const speedBox = document.getElementById("speedBox");
-const led = document.getElementById("led");
-const msg = document.getElementById("msg");
+L.tileLayer(
+"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+).addTo(map);
 
-// LOCAL ZONE STORAGE (IMPORTANT FIX)
-let zonesLocal = [];
-let lastLogTime = 0;
+/* ZONES */
+let zoneShapes = [];
+let zones = [];
 
-// LOAD ZONES FROM FIREBASE
-onValue(ref(db,"zones"), snap=>{
-  zonesLocal = [];
+onValue(ref(db,"zones"), snap => {
 
-  snap.forEach(z=>{
-    const d = z.val();
+  zoneShapes.forEach(z => map.removeLayer(z));
+  zoneShapes = [];
+  zones = [];
+
+  snap.forEach(child => {
+
+    const d = child.val();
+    zones.push(d);
+
+    let color = d.type === "School" ? "orange" : "red";
 
     const rect = L.rectangle(
       [[d.lat1,d.lng1],[d.lat2,d.lng2]],
-      {color:"red",fillOpacity:0.2}
+      { color: color, fillOpacity:0.3 }
     ).addTo(map);
 
-    zonesLocal.push({
-      bounds: rect.getBounds(),
-      type: d.type,
-      limit: d.limit
-    });
+    rect.bindPopup(
+      "<b>"+(d.name || d.type)+"</b><br>" +
+      "Speed Limit: "+d.limit+" km/h"
+    );
+
+    zoneShapes.push(rect);
+
   });
+
 });
 
-// GPS DATA
-onValue(ref(db,"GPS"), snap=>{
+/* 🔴 HARDWARE */
+let vehicleMarker = L.marker([0,0],{
+  icon: L.icon({
+    iconUrl:"https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+    iconSize:[32,32]
+  })
+}).addTo(map).bindPopup("🚗 Vehicle");
+
+/* 🔵 MOBILE */
+let mobileMarker;
+
+/* HARDWARE GPS */
+onValue(ref(db,"GPS"), snap => {
+
   const d = snap.val();
   if(!d) return;
 
   const lat = d.f_latitude;
   const lng = d.f_longitude;
+  const speed = d.f_speed;
 
-  // ✅ FIXED SPEED
-  const speed = (d.f_speed || 0) * 3.6;
-
-  speedBox.innerText = "Speed: " + speed.toFixed(1) + " km/h";
-
-  marker.setLatLng([lat,lng]);
+  vehicleMarker.setLatLng([lat,lng]);
   map.setView([lat,lng],18);
 
-  let inside = false;
-  let overspeed = false;
+  checkZone(lat,lng,speed,"hardware");
 
-  zonesLocal.forEach(z=>{
-    if(z.bounds.contains([lat,lng])){
+});
 
-      inside = true;
+/* MOBILE GPS */
+if(navigator.geolocation){
+
+  navigator.geolocation.watchPosition(pos=>{
+
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+
+    if(!mobileMarker){
+      mobileMarker = L.marker([lat,lng],{
+        icon: L.icon({
+          iconUrl:"https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+          iconSize:[32,32]
+        })
+      }).addTo(map)
+      .bindPopup("📱 Mobile");
+    }else{
+      mobileMarker.setLatLng([lat,lng]);
+    }
+
+  });
+
+}
+
+/* CHECK ZONE */
+function checkZone(lat,lng,speed,device){
+
+  let inZone = false;
+
+  zones.forEach(z=>{
+
+    if(
+      lat >= z.lat1 && lat <= z.lat2 &&
+      lng >= z.lng1 && lng <= z.lng2
+    ){
+
+      inZone = true;
 
       if(speed > z.limit){
 
-        overspeed = true;
-        msg.innerText = "🚨 Overspeed in "+z.type+" zone!";
+        document.getElementById("topbar").innerHTML =
+        "🚨 OVER SPEED! Limit: "+z.limit+" km/h | Speed: "+speed;
 
-        const now = Date.now();
-
-        // LOG FIX
-        if(now - lastLogTime > 3000){
-          lastLogTime = now;
-
-          const time = new Date().toLocaleTimeString();
-
-          const row = `
-          <tr>
-          <td>${speed.toFixed(1)} km/h</td>
-          <td>${time}</td>
-          <td>${z.type}</td>
-          <td>${lat.toFixed(5)}, ${lng.toFixed(5)}</td>
-          </tr>
-          `;
-
-          document.getElementById("log").innerHTML += row;
-        }
+        push(ref(db,"violations"),{
+          speed: speed.toFixed(1),
+          zone: z.type,
+          time: new Date().toLocaleTimeString(),
+          device: device
+        });
 
       }else{
-        msg.innerText = "Inside "+z.type+" zone (Safe)";
+
+        document.getElementById("topbar").innerHTML =
+        "✅ Safe | Limit: "+z.limit+" | Speed: "+speed;
+
       }
+
     }
+
   });
 
-  if(!inside){
-    msg.innerText = "Normal Road";
+  if(!inZone){
+    document.getElementById("topbar").innerHTML =
+    "🚗 Outside Zone | Speed: "+speed;
   }
 
-  // LED
-  if(overspeed){
-    led.style.background = "red";
-  }else{
-    led.style.background = "green";
-  }
+}
+
+/* LOAD VIOLATIONS LIST */
+onValue(ref(db,"violations"), snap => {
+
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  snap.forEach(child => {
+
+    const v = child.val();
+
+    const div = document.createElement("div");
+    div.className = "violation";
+
+    div.innerHTML =
+    "🚨 Speed: "+v.speed+" km/h<br>" +
+    "Zone: "+v.zone+"<br>" +
+    "Time: "+v.time+"<br>" +
+    "Device: "+v.device;
+
+    list.prepend(div);
+
+  });
 
 });
 
