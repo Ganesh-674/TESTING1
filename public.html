@@ -3,6 +3,7 @@
 <head>
 
 <title>Public View</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <link rel="stylesheet"
 href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -11,34 +12,56 @@ href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
 <style>
 body{margin:0;font-family:Arial;}
+
+/* TOP BAR */
 #topbar{
 position:fixed;
 top:0;
+left:0;
 width:100%;
 background:black;
 color:white;
 padding:10px;
 text-align:center;
+z-index:1000;
 }
-#map{height:65vh;margin-top:50px;}
+
+/* MAP */
+#map{
+height:65vh;
+width:100%;
+margin-top:50px;
+}
+
+/* VIOLATION PANEL */
 #violationsPanel{
 height:35vh;
-overflow:auto;
+overflow-y:auto;
 background:#111;
 color:white;
 padding:10px;
 }
+
+.violation{
+border-bottom:1px solid gray;
+padding:8px;
+}
+
+.overspeed{ color:red; }
+.safe{ color:lightgreen; }
+
 </style>
 
 </head>
 
 <body>
 
-<div id="topbar">Waiting GPS...</div>
+<div id="topbar">🚦 Waiting for GPS...</div>
+
 <div id="map"></div>
 
 <div id="violationsPanel">
-<h3>Violations</h3>
+<h3>🚨 Violations</h3>
 <div id="list"></div>
 </div>
 
@@ -51,34 +74,66 @@ import { getDatabase, ref, onValue, push }
 from "https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js";
 
 /* FIREBASE */
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "speed-alert-fd1be.firebaseapp.com",
-  databaseURL: "https://speed-alert-fd1be-default-rtdb.firebaseio.com",
-  projectId: "speed-alert-fd1be",
-};
+const app = initializeApp({
+databaseURL:"https://speed-alert-fd1be-default-rtdb.firebaseio.com"
+});
 
-const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
 /* MAP */
-const map = L.map("map").setView([10.9945,77.0835],15);
+const map = L.map("map")
+.setView([10.9945,77.0835],15);
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
-.addTo(map);
+L.tileLayer(
+"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+).addTo(map);
 
+/* ZONES */
+let zoneShapes = [];
 let zones = [];
 
-onValue(ref(db,"zones"), snap=>{
-  zones=[];
-  snap.forEach(c=>zones.push(c.val()));
+onValue(ref(db,"zones"), snap => {
+
+  zoneShapes.forEach(z => map.removeLayer(z));
+  zoneShapes = [];
+  zones = [];
+
+  snap.forEach(child => {
+
+    const d = child.val();
+    zones.push(d);
+
+    let color = d.type === "School" ? "orange" : "red";
+
+    const rect = L.rectangle(
+      [[d.lat1,d.lng1],[d.lat2,d.lng2]],
+      { color: color, fillOpacity:0.3 }
+    ).addTo(map);
+
+    rect.bindPopup(
+      "<b>"+(d.name || d.type)+"</b><br>" +
+      "Speed Limit: "+d.limit+" km/h"
+    );
+
+    zoneShapes.push(rect);
+
+  });
+
 });
 
-let marker = L.marker([0,0]).addTo(map);
+/* 🔴 HARDWARE */
+let vehicleMarker = L.marker([0,0],{
+  icon: L.icon({
+    iconUrl:"https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+    iconSize:[32,32]
+  })
+}).addTo(map).bindPopup("🚗 Vehicle");
 
-let lastViolationTime = 0;
+/* 🔵 MOBILE */
+let mobileMarker;
 
-onValue(ref(db,"GPS"), snap=>{
+/* HARDWARE GPS */
+onValue(ref(db,"GPS"), snap => {
 
   const d = snap.val();
   if(!d) return;
@@ -87,64 +142,102 @@ onValue(ref(db,"GPS"), snap=>{
   const lng = d.f_longitude;
   const speed = d.f_speed;
 
-  marker.setLatLng([lat,lng]);
+  vehicleMarker.setLatLng([lat,lng]);
   map.setView([lat,lng],18);
 
-  checkZone(lat,lng,speed);
+  checkZone(lat,lng,speed,"hardware");
 
 });
 
-function checkZone(lat,lng,speed){
+/* MOBILE GPS */
+if(navigator.geolocation){
 
-  let now = Date.now();
+  navigator.geolocation.watchPosition(pos=>{
 
-  zones.forEach(z=>{
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
 
-    if(
-      lat >= Math.min(z.lat1,z.lat2) &&
-      lat <= Math.max(z.lat1,z.lat2) &&
-      lng >= Math.min(z.lng1,z.lng2) &&
-      lng <= Math.max(z.lng1,z.lng2)
-    ){
-
-      if(speed > z.limit){
-
-        document.body.style.background="#300";
-
-        if(now - lastViolationTime > 10000){
-
-          lastViolationTime = now;
-
-          push(ref(db,"violations"),{
-            speed:speed,
-            zone:z.name || z.type,
-            time:new Date().toLocaleTimeString()
-          });
-
-        }
-
-      }else{
-        document.body.style.background="#030";
-      }
-
+    if(!mobileMarker){
+      mobileMarker = L.marker([lat,lng],{
+        icon: L.icon({
+          iconUrl:"https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+          iconSize:[32,32]
+        })
+      }).addTo(map)
+      .bindPopup("📱 Mobile");
+    }else{
+      mobileMarker.setLatLng([lat,lng]);
     }
 
   });
 
 }
 
-onValue(ref(db,"violations"), snap=>{
+/* CHECK ZONE */
+function checkZone(lat,lng,speed,device){
 
-  list.innerHTML="";
+  let inZone = false;
 
-  snap.forEach(c=>{
-    const v=c.val();
-    list.innerHTML += `
-      <div>
-        Speed:${v.speed} <br>
-        Zone:${v.zone} <br>
-        Time:${v.time}
-      </div><hr>`;
+  zones.forEach(z=>{
+
+    if(
+      lat >= z.lat1 && lat <= z.lat2 &&
+      lng >= z.lng1 && lng <= z.lng2
+    ){
+
+      inZone = true;
+
+      if(speed > z.limit){
+
+        document.getElementById("topbar").innerHTML =
+        "🚨 OVER SPEED! Limit: "+z.limit+" km/h | Speed: "+speed;
+
+        push(ref(db,"violations"),{
+          speed: speed.toFixed(1),
+          zone: z.type,
+          time: new Date().toLocaleTimeString(),
+          device: device
+        });
+
+      }else{
+
+        document.getElementById("topbar").innerHTML =
+        "✅ Safe | Limit: "+z.limit+" | Speed: "+speed;
+
+      }
+
+    }
+
+  });
+
+  if(!inZone){
+    document.getElementById("topbar").innerHTML =
+    "🚗 Outside Zone | Speed: "+speed;
+  }
+
+}
+
+/* LOAD VIOLATIONS LIST */
+onValue(ref(db,"violations"), snap => {
+
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  snap.forEach(child => {
+
+    const v = child.val();
+
+    const div = document.createElement("div");
+    div.className = "violation";
+
+    div.innerHTML =
+    "🚨 Speed: "+v.speed+" km/h<br>" +
+    "Zone: "+v.zone+"<br>" +
+    "Time: "+v.time+"<br>" +
+    "Device: "+v.device;
+
+    list.prepend(div);
+
   });
 
 });
