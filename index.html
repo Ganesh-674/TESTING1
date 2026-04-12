@@ -4,15 +4,24 @@
 <title>Login</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-body{font-family:Arial;text-align:center;padding-top:100px;background:#0f2027;color:white;}
-input,button{padding:10px;margin:5px;}
+body{
+  font-family:Arial;
+  text-align:center;
+  padding-top:100px;
+  background:#0f2027;
+  color:white;
+}
+input,button{
+  padding:10px;
+  margin:5px;
+}
 </style>
 </head>
 <body>
 
 <h1>Speed Echo</h1>
 
-<input id="password" placeholder="Enter Password"><br>
+<input id="password" type="password" placeholder="Enter Password"><br>
 
 <button onclick="login()">Login</button>
 
@@ -25,7 +34,7 @@ input,button{padding:10px;margin:5px;}
 <script>
 function login(){
   if(password.value==="zone123"){
-    localStorage.setItem("admin","yes");
+    localStorage.setItem("zoneUser", JSON.stringify({role:"Admin"}));
     location.href="zonedashboard.html";
   }else{
     msg.innerText="Wrong Password";
